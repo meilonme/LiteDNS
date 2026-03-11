@@ -1,0 +1,28 @@
+server:
+  host: 0.0.0.0
+  port: 8080
+
+db:
+  path: data.db
+
+auth:
+  session_ttl_sec: 43200
+  force_change_password: true
+
+sync:
+  ttl_sec: 600
+
+ddns:
+  default_interval_sec: 300
+  retry_delays_sec: [2, 4, 8]
+
+logs:
+  retention_days: 90
+
+ip:
+  public_ip_check: true
+  check_interval_sec: 300
+  sources:
+    - https://api.ipify.org
+    - https://checkip.amazonaws.com
+    - https://ifconfig.co/ip

@@ -1,0 +1,16 @@
+# Go
+bin/
+*.test
+*.out
+
+# Local data
+*.db
+config.local.yaml
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Editor
+.DS_Store
+.vscode/
