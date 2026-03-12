@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"strings"
@@ -32,6 +33,10 @@ type App struct {
 }
 
 func New() (*App, error) {
+	if err := ensureContainerConfig(); err != nil {
+		return nil, fmt.Errorf("ensure container config: %w", err)
+	}
+
 	configPath := strings.TrimSpace(os.Getenv("LITEDNS_CONFIG_PATH"))
 	if configPath == "" {
 		configPath = "config.yaml"
@@ -134,4 +139,43 @@ func runLogCleanup(ctx context.Context, logsSvc *logs.Service, retentionDays int
 			}
 		}
 	}
+}
+
+func ensureContainerConfig() error {
+	const (
+		targetPath  = "/app/config.yaml"
+		examplePath = "/app/config.example.yaml"
+	)
+
+	if _, err := os.Stat(targetPath); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+
+	if _, err := os.Stat(examplePath); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	src, err := os.Open(examplePath)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+
+	dst, err := os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		return err
+	}
+	defer dst.Close()
+
+	if _, err := io.Copy(dst, src); err != nil {
+		return err
+	}
+
+	log.Printf("generated config from example: %s <- %s", targetPath, examplePath)
+	return nil
 }

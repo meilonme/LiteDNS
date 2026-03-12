@@ -137,7 +137,12 @@ func (s *Service) SyncRecordsIfExpired(ctx context.Context, domainID int64) erro
 	if err != nil {
 		return err
 	}
-	if d.LastSyncedAt == nil || d.LastSyncedAt.Add(s.syncTTL).Before(time.Now().UTC()) {
+	var localRecordCount int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(1) FROM records WHERE domain_id = ?`, domainID).Scan(&localRecordCount); err != nil {
+		return fmt.Errorf("count local records: %w", err)
+	}
+
+	if localRecordCount == 0 || d.LastSyncedAt == nil || d.LastSyncedAt.Add(s.syncTTL).Before(time.Now().UTC()) {
 		_, err := s.SyncDomainRecords(ctx, domainID)
 		return err
 	}
@@ -177,11 +182,10 @@ func (s *Service) SyncVendorDomains(ctx context.Context, vendorID int64) error {
 			VALUES(?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(vendor_id, domain_name)
 			DO UPDATE SET remote_domain_id = excluded.remote_domain_id,
-				last_synced_at = excluded.last_synced_at,
 				expires_at = excluded.expires_at,
 				renew_url = excluded.renew_url,
 				updated_at = excluded.updated_at
-		`, vendorID, nullableString(d.ID), d.Name, now, nullableTime(d.ExpiresAt), nullableString(renewURL), now, now); err != nil {
+		`, vendorID, nullableString(d.ID), d.Name, nil, nullableTime(d.ExpiresAt), nullableString(renewURL), now, now); err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("upsert domain: %w", err)
 		}
