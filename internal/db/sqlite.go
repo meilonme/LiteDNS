@@ -46,6 +46,8 @@ var schemaStatements = []string{
 		remote_domain_id TEXT NULL,
 		domain_name TEXT NOT NULL,
 		last_synced_at DATETIME NULL,
+		expires_at DATETIME NULL,
+		renew_url TEXT NULL,
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL,
 		UNIQUE(vendor_id, domain_name),
@@ -202,6 +204,14 @@ func Migrate(ctx context.Context, conn *sql.DB) error {
 		return err
 	}
 	if err := ensureColumnExists(ctx, tx, "public_ip_check_settings", "last_checked_at", `ALTER TABLE public_ip_check_settings ADD COLUMN last_checked_at DATETIME NULL`); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := ensureColumnExists(ctx, tx, "domains", "expires_at", `ALTER TABLE domains ADD COLUMN expires_at DATETIME NULL`); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := ensureColumnExists(ctx, tx, "domains", "renew_url", `ALTER TABLE domains ADD COLUMN renew_url TEXT NULL`); err != nil {
 		_ = tx.Rollback()
 		return err
 	}

@@ -110,9 +110,18 @@ const settingsState = reactive({
 const isAuthed = computed(() => Boolean(token.value))
 const selectedDomain = computed(() => domains.value.find((d) => d.id === selectedDomainId.value) ?? null)
 const domainCount = computed(() => domains.value.length)
-const providerCount = computed(() => vendors.value.length)
 const runningTaskCount = computed(() => tasks.value.filter((t) => t.status === 'running').length)
-const dashboardDomains = computed(() => domains.value.slice(0, 5))
+const expiringDomainsIn30Days = computed(() => {
+  return domains.value
+    .map((domain) => {
+      const daysLeft = calcDaysLeft(domain.expires_at)
+      return { domain, daysLeft }
+    })
+    .filter((item): item is { domain: DomainItem; daysLeft: number } => item.daysLeft !== null && item.daysLeft >= 0 && item.daysLeft <= 30)
+    .sort((a, b) => a.daysLeft - b.daysLeft)
+})
+const expiringDomainCount30 = computed(() => expiringDomainsIn30Days.value.length)
+const dashboardExpiringDomains = computed(() => expiringDomainsIn30Days.value.slice(0, 5))
 const todayText = computed(() => new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' }))
 
 const recordStats = computed(() => {
@@ -252,6 +261,75 @@ function formatTime(raw?: string): string {
     return raw
   }
   return d.toLocaleString()
+}
+
+function formatDate(raw?: string): string {
+  if (!raw) {
+    return '-'
+  }
+  const d = new Date(raw)
+  if (Number.isNaN(d.getTime())) {
+    return raw
+  }
+  return d.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
+}
+
+function calcDaysLeft(raw?: string): number | null {
+  if (!raw) {
+    return null
+  }
+  const expiry = new Date(raw)
+  if (Number.isNaN(expiry.getTime())) {
+    return null
+  }
+  const now = new Date()
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+  const expiryStart = new Date(expiry.getFullYear(), expiry.getMonth(), expiry.getDate()).getTime()
+  return Math.floor((expiryStart - todayStart) / 86400000)
+}
+
+function daysLeftClass(daysLeft: number): string {
+  if (daysLeft <= 7) {
+    return 'bg-red-100 text-red-600'
+  }
+  if (daysLeft <= 15) {
+    return 'bg-amber-100 text-amber-600'
+  }
+  return 'bg-blue-100 text-blue-600'
+}
+
+function vendorProvider(vendorId: number): ProviderName | '' {
+  return vendors.value.find((v) => v.id === vendorId)?.provider ?? ''
+}
+
+function resolveRenewURL(domain: DomainItem): string {
+  const customURL = domain.renew_url?.trim()
+  if (customURL) {
+    return customURL
+  }
+
+  const provider = vendorProvider(domain.vendor_id)
+  if (provider === 'aliyun') {
+    const keyword = encodeURIComponent(domain.domain_name)
+    return `https://dc.console.aliyun.com/next/index#/domain-list/all?keyword=${keyword}`
+  }
+  if (provider === 'cloudflare') {
+    return 'https://dash.cloudflare.com/'
+  }
+  return ''
+}
+
+function openRenewPage(domain: DomainItem): void {
+  const renewURL = resolveRenewURL(domain)
+  if (!renewURL) {
+    setNotice('error', '未找到可用的续费链接')
+    return
+  }
+
+  const opened = window.open(renewURL, '_blank', 'noopener,noreferrer')
+  if (!opened) {
+    window.location.href = renewURL
+  }
 }
 
 function vendorName(vendorId: number): string {
@@ -1017,17 +1095,17 @@ onMounted(async () => {
 
               <div class="glass-card p-6 rounded-2xl shadow-sm hover:shadow-md transition-shadow group">
                 <div class="flex items-start justify-between mb-4">
-                  <div class="w-12 h-12 bg-purple-50 rounded-xl flex items-center justify-center text-purple-600">👥</div>
-                  <span class="bg-purple-100 text-purple-600 text-xs px-2 py-1 rounded-md">在线</span>
+                  <div class="w-12 h-12 bg-amber-50 rounded-xl flex items-center justify-center text-amber-600">🕒</div>
+                  <span class="bg-amber-100 text-amber-600 text-xs px-2 py-1 rounded-md">需关注</span>
                 </div>
-                <p class="text-slate-500 text-sm font-medium">核心提供商</p>
-                <h3 class="text-3xl font-bold text-slate-900 mt-1">{{ providerCount }}</h3>
+                <p class="text-slate-500 text-sm font-medium">30天内到期</p>
+                <h3 class="text-3xl font-bold text-slate-900 mt-1">{{ expiringDomainCount30 }}</h3>
               </div>
             </div>
 
             <div class="glass-card rounded-2xl shadow-sm overflow-hidden">
               <div class="p-6 border-b border-slate-100 flex items-center justify-between">
-                <h4 class="font-bold text-slate-900">域名同步状态</h4>
+                <h4 class="font-bold text-slate-900">临近到期域名</h4>
                 <a class="text-blue-600 text-sm hover:underline cursor-pointer" @click="activeTab = 'domains'">查看全部</a>
               </div>
               <div class="overflow-x-auto">
@@ -1036,27 +1114,27 @@ onMounted(async () => {
                     <tr>
                       <th class="px-6 py-4 font-semibold">域名</th>
                       <th class="px-6 py-4 font-semibold">提供商</th>
-                      <th class="px-6 py-4 font-semibold">最后同步</th>
-                      <th class="px-6 py-4 font-semibold">状态</th>
+                      <th class="px-6 py-4 font-semibold">到期时间</th>
+                      <th class="px-6 py-4 font-semibold">剩余天数</th>
                       <th class="px-6 py-4 font-semibold">操作</th>
                     </tr>
                   </thead>
                   <tbody class="divide-y divide-slate-100 text-sm">
-                    <tr v-for="d in dashboardDomains" :key="d.id">
-                      <td class="px-6 py-4 font-medium text-slate-900 text-base">{{ d.domain_name }}</td>
-                      <td class="px-6 py-4">{{ vendorName(d.vendor_id) }}</td>
-                      <td class="px-6 py-4">{{ formatTime(d.last_synced_at) }}</td>
+                    <tr v-for="item in dashboardExpiringDomains" :key="item.domain.id">
+                      <td class="px-6 py-4 font-medium text-slate-900 text-base">{{ item.domain.domain_name }}</td>
+                      <td class="px-6 py-4">{{ vendorName(item.domain.vendor_id) }}</td>
+                      <td class="px-6 py-4">{{ formatDate(item.domain.expires_at) }}</td>
                       <td class="px-6 py-4">
-                        <span class="px-2 py-1 rounded text-xs font-bold" :class="d.last_synced_at ? 'bg-green-50 text-green-600' : 'bg-amber-50 text-amber-600'">
-                          {{ d.last_synced_at ? '已同步' : '待同步' }}
+                        <span class="px-2 py-1 rounded text-xs font-bold" :class="daysLeftClass(item.daysLeft)">
+                          {{ item.daysLeft }}天
                         </span>
                       </td>
                       <td class="px-6 py-4 text-blue-600 cursor-pointer hover:font-bold">
-                        <button :disabled="loading" @click="triggerDomainSync(d.id)">立即同步</button>
+                        <button :disabled="loading" @click="openRenewPage(item.domain)">前往续费</button>
                       </td>
                     </tr>
-                    <tr v-if="dashboardDomains.length === 0">
-                      <td colspan="5" class="px-6 py-10 text-center text-slate-400">暂无域名数据</td>
+                    <tr v-if="dashboardExpiringDomains.length === 0">
+                      <td colspan="5" class="px-6 py-10 text-center text-slate-400">暂无30天内到期域名</td>
                     </tr>
                   </tbody>
                 </table>

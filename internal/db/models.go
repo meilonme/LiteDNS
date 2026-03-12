@@ -67,6 +67,8 @@ type Domain struct {
 	RemoteDomainID *string    `db:"remote_domain_id"`
 	DomainName     string     `db:"domain_name"`
 	LastSyncedAt   *time.Time `db:"last_synced_at"`
+	ExpiresAt      *time.Time `db:"expires_at"`
+	RenewURL       *string    `db:"renew_url"`
 	CreatedAt      time.Time  `db:"created_at"`
 	UpdatedAt      time.Time  `db:"updated_at"`
 }

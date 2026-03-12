@@ -31,6 +31,8 @@ export interface DomainItem {
   remote_domain_id?: string
   domain_name: string
   last_synced_at?: string
+  expires_at?: string
+  renew_url?: string
   created_at: string
   updated_at: string
 }

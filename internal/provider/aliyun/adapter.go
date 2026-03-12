@@ -41,8 +41,12 @@ type describeDomainsResponse struct {
 	PageSize   int `json:"PageSize"`
 	Domains    struct {
 		Domain []struct {
-			DomainID   string `json:"DomainId"`
-			DomainName string `json:"DomainName"`
+			DomainID           string `json:"DomainId"`
+			DomainName         string `json:"DomainName"`
+			ExpirationDate     string `json:"ExpirationDate"`
+			ExpireDate         string `json:"ExpireDate"`
+			ExpirationDateLong int64  `json:"ExpirationDateLong"`
+			ExpireDateLong     int64  `json:"ExpireDateLong"`
 		} `json:"Domain"`
 	} `json:"Domains"`
 }
@@ -106,7 +110,12 @@ func (a *Adapter) ListDomains(ctx context.Context, credential provider.Credentia
 			return nil, fmt.Errorf("list aliyun domains: %w", err)
 		}
 		for _, d := range resp.Domains.Domain {
-			out = append(out, provider.DomainRemote{ID: d.DomainID, Name: d.DomainName})
+			out = append(out, provider.DomainRemote{
+				ID:        d.DomainID,
+				Name:      d.DomainName,
+				ExpiresAt: parseAliyunExpiration(d.ExpirationDate, d.ExpireDate, d.ExpirationDateLong, d.ExpireDateLong),
+				RenewURL:  buildRenewURL(d.DomainName),
+			})
 		}
 		if len(resp.Domains.Domain) == 0 {
 			break
@@ -440,6 +449,59 @@ func randomNonce() string {
 		return strconv.FormatInt(time.Now().UnixNano(), 10)
 	}
 	return hex.EncodeToString(buf)
+}
+
+func parseAliyunExpiration(expirationDate, expireDate string, expirationDateLong, expireDateLong int64) *time.Time {
+	if t, ok := parseAliyunTimestamp(expirationDateLong); ok {
+		return &t
+	}
+	if t, ok := parseAliyunTimestamp(expireDateLong); ok {
+		return &t
+	}
+	for _, raw := range []string{expirationDate, expireDate} {
+		if t, ok := parseAliyunDate(raw); ok {
+			return &t
+		}
+	}
+	return nil
+}
+
+func parseAliyunTimestamp(raw int64) (time.Time, bool) {
+	if raw <= 0 {
+		return time.Time{}, false
+	}
+	if raw > 9999999999 {
+		return time.UnixMilli(raw).UTC(), true
+	}
+	return time.Unix(raw, 0).UTC(), true
+}
+
+func parseAliyunDate(raw string) (time.Time, bool) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return time.Time{}, false
+	}
+	formats := []string{
+		time.RFC3339,
+		"2006-01-02T15:04:05Z",
+		"2006-01-02 15:04:05",
+		"2006-01-02",
+	}
+	for _, layout := range formats {
+		if t, err := time.Parse(layout, trimmed); err == nil {
+			return t.UTC(), true
+		}
+	}
+	return time.Time{}, false
+}
+
+func buildRenewURL(domain string) string {
+	const base = "https://dc.console.aliyun.com/next/index#/domain-list/all"
+	trimmed := strings.TrimSpace(domain)
+	if trimmed == "" {
+		return base
+	}
+	return base + "?keyword=" + url.QueryEscape(trimmed)
 }
 
 func normalizeRR(v string) string {

@@ -1,0 +1,4 @@
+.git
+.cache
+.tmp
+frontend/node_modules

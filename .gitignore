@@ -4,8 +4,10 @@ bin/
 *.out
 
 # Local data
+data/
 *.db
 config.local.yaml
+configs/config.local.yaml
 
 # Frontend
 frontend/node_modules/
@@ -14,3 +16,6 @@ frontend/dist/
 # Editor
 .DS_Store
 .vscode/
+.tmp/
+.codex/
+.cache/

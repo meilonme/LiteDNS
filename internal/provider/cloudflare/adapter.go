@@ -94,7 +94,11 @@ func (a *Adapter) ListDomains(ctx context.Context, credential provider.Credentia
 			return nil, fmt.Errorf("list cloudflare zones: %w", err)
 		}
 		for _, z := range zones {
-			out = append(out, provider.DomainRemote{ID: z.ID, Name: z.Name})
+			out = append(out, provider.DomainRemote{
+				ID:       z.ID,
+				Name:     z.Name,
+				RenewURL: buildRenewURL(z.Name),
+			})
 		}
 		if info.TotalPages > 0 && page >= info.TotalPages {
 			break
@@ -353,6 +357,14 @@ func buildAPIError(statusCode int, errs []apiError) error {
 		parts = append(parts, fmt.Sprintf("%d:%s", e.Code, e.Message))
 	}
 	return fmt.Errorf("cloudflare api status %d: %s", statusCode, strings.Join(parts, "; "))
+}
+
+func buildRenewURL(domain string) string {
+	const base = "https://dash.cloudflare.com/"
+	if strings.TrimSpace(domain) == "" {
+		return base
+	}
+	return base
 }
 
 func resolveToken(credential provider.Credential) string {

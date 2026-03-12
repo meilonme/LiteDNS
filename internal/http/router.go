@@ -1,6 +1,11 @@
 package http
 
 import (
+	"fmt"
+	"net/http"
+	"os"
+	"path/filepath"
+
 	"github.com/gin-gonic/gin"
 
 	"litedns/internal/modules/auth"
@@ -22,9 +27,12 @@ type Dependencies struct {
 	Settings *settings.Service
 }
 
-func NewRouter(deps Dependencies) *gin.Engine {
+func NewRouter(deps Dependencies, trustedProxies []string) (*gin.Engine, error) {
 	r := gin.New()
 	r.Use(gin.Recovery(), gin.Logger())
+	if err := r.SetTrustedProxies(trustedProxies); err != nil {
+		return nil, fmt.Errorf("set trusted proxies: %w", err)
+	}
 
 	r.GET("/healthz", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "ok"})
@@ -48,5 +56,43 @@ func NewRouter(deps Dependencies) *gin.Engine {
 		settings.RegisterRoutes(protected, deps.Settings, deps.Logs)
 	}
 
-	return r
+	registerWebRoutes(r)
+
+	return r, nil
+}
+
+func registerWebRoutes(r *gin.Engine) {
+	staticDir := findStaticDir()
+	if staticDir == "" {
+		return
+	}
+
+	r.Static("/assets", filepath.Join(staticDir, "assets"))
+	r.GET("/", func(c *gin.Context) {
+		c.File(filepath.Join(staticDir, "index.html"))
+	})
+	r.NoRoute(func(c *gin.Context) {
+		if c.Request.Method != http.MethodGet {
+			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+			return
+		}
+		if len(c.Request.URL.Path) >= 4 && c.Request.URL.Path[:4] == "/api/" {
+			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+			return
+		}
+		c.File(filepath.Join(staticDir, "index.html"))
+	})
+}
+
+func findStaticDir() string {
+	candidates := []string{
+		"web",
+		"frontend/dist",
+	}
+	for _, candidate := range candidates {
+		if info, err := os.Stat(filepath.Join(candidate, "index.html")); err == nil && !info.IsDir() {
+			return candidate
+		}
+	}
+	return ""
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"time"
 )
 
 var (
@@ -20,8 +21,10 @@ type Credential struct {
 }
 
 type DomainRemote struct {
-	ID   string
-	Name string
+	ID        string
+	Name      string
+	ExpiresAt *time.Time
+	RenewURL  string
 }
 
 type RecordRemote struct {

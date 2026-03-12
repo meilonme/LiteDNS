@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -20,6 +21,8 @@ type Domain struct {
 	RemoteDomainID *string    `json:"remote_domain_id,omitempty"`
 	DomainName     string     `json:"domain_name"`
 	LastSyncedAt   *time.Time `json:"last_synced_at,omitempty"`
+	ExpiresAt      *time.Time `json:"expires_at,omitempty"`
+	RenewURL       *string    `json:"renew_url,omitempty"`
 	CreatedAt      time.Time  `json:"created_at"`
 	UpdatedAt      time.Time  `json:"updated_at"`
 }
@@ -70,7 +73,7 @@ func (s *Service) ListDomains(ctx context.Context, vendorID *int64) ([]Domain, e
 	}
 
 	query := `
-		SELECT id, vendor_id, remote_domain_id, domain_name, last_synced_at, created_at, updated_at
+		SELECT id, vendor_id, remote_domain_id, domain_name, last_synced_at, expires_at, renew_url, created_at, updated_at
 		FROM domains
 	`
 	args := make([]any, 0)
@@ -165,12 +168,20 @@ func (s *Service) SyncVendorDomains(ctx context.Context, vendorID int64) error {
 		if strings.TrimSpace(d.Name) == "" {
 			continue
 		}
+		renewURL := strings.TrimSpace(d.RenewURL)
+		if renewURL == "" {
+			renewURL = defaultRenewURL(resolved.Provider, d.Name)
+		}
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO domains(vendor_id, remote_domain_id, domain_name, last_synced_at, created_at, updated_at)
-			VALUES(?, ?, ?, ?, ?, ?)
+			INSERT INTO domains(vendor_id, remote_domain_id, domain_name, last_synced_at, expires_at, renew_url, created_at, updated_at)
+			VALUES(?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(vendor_id, domain_name)
-			DO UPDATE SET remote_domain_id = excluded.remote_domain_id, last_synced_at = excluded.last_synced_at, updated_at = excluded.updated_at
-		`, vendorID, nullableString(d.ID), d.Name, now, now, now); err != nil {
+			DO UPDATE SET remote_domain_id = excluded.remote_domain_id,
+				last_synced_at = excluded.last_synced_at,
+				expires_at = excluded.expires_at,
+				renew_url = excluded.renew_url,
+				updated_at = excluded.updated_at
+		`, vendorID, nullableString(d.ID), d.Name, now, nullableTime(d.ExpiresAt), nullableString(renewURL), now, now); err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("upsert domain: %w", err)
 		}
@@ -282,7 +293,7 @@ func (s *Service) SyncDomainRecords(ctx context.Context, domainID int64) (SyncSu
 
 func (s *Service) GetDomain(ctx context.Context, domainID int64) (Domain, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, vendor_id, remote_domain_id, domain_name, last_synced_at, created_at, updated_at
+		SELECT id, vendor_id, remote_domain_id, domain_name, last_synced_at, expires_at, renew_url, created_at, updated_at
 		FROM domains WHERE id = ?
 	`, domainID)
 	item, err := scanDomain(row)
@@ -325,13 +336,38 @@ func nullableString(v string) any {
 	return v
 }
 
+func nullableTime(v *time.Time) any {
+	if v == nil {
+		return nil
+	}
+	return v.UTC()
+}
+
+func defaultRenewURL(providerName, domainName string) string {
+	trimmedDomain := strings.TrimSpace(domainName)
+	switch strings.ToLower(strings.TrimSpace(providerName)) {
+	case "aliyun":
+		const base = "https://dc.console.aliyun.com/next/index#/domain-list/all"
+		if trimmedDomain == "" {
+			return base
+		}
+		return base + "?keyword=" + url.QueryEscape(trimmedDomain)
+	case "cloudflare":
+		return "https://dash.cloudflare.com/"
+	default:
+		return ""
+	}
+}
+
 func scanDomain(scanner interface{ Scan(dest ...any) error }) (Domain, error) {
 	var (
 		domain       Domain
 		remoteDomain sql.NullString
 		lastSynced   sql.NullTime
+		expiresAt    sql.NullTime
+		renewURL     sql.NullString
 	)
-	if err := scanner.Scan(&domain.ID, &domain.VendorID, &remoteDomain, &domain.DomainName, &lastSynced, &domain.CreatedAt, &domain.UpdatedAt); err != nil {
+	if err := scanner.Scan(&domain.ID, &domain.VendorID, &remoteDomain, &domain.DomainName, &lastSynced, &expiresAt, &renewURL, &domain.CreatedAt, &domain.UpdatedAt); err != nil {
 		return Domain{}, err
 	}
 	if remoteDomain.Valid {
@@ -340,6 +376,13 @@ func scanDomain(scanner interface{ Scan(dest ...any) error }) (Domain, error) {
 	if lastSynced.Valid {
 		t := lastSynced.Time
 		domain.LastSyncedAt = &t
+	}
+	if expiresAt.Valid {
+		t := expiresAt.Time
+		domain.ExpiresAt = &t
+	}
+	if renewURL.Valid && strings.TrimSpace(renewURL.String) != "" {
+		domain.RenewURL = &renewURL.String
 	}
 	return domain, nil
 }

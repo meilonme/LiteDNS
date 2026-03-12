@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
+	"strings"
 	"time"
 
 	"litedns/internal/config"
@@ -30,7 +32,12 @@ type App struct {
 }
 
 func New() (*App, error) {
-	cfg, err := config.Load("config.yaml")
+	configPath := strings.TrimSpace(os.Getenv("LITEDNS_CONFIG_PATH"))
+	if configPath == "" {
+		configPath = "config.yaml"
+	}
+
+	cfg, err := config.Load(configPath)
 	if err != nil {
 		return nil, fmt.Errorf("load config: %w", err)
 	}
@@ -69,7 +76,7 @@ func New() (*App, error) {
 		log.Printf("bootstrap admin created: username=%s password=%s", username, password)
 	}
 
-	router := apphttp.NewRouter(apphttp.Dependencies{
+	router, err := apphttp.NewRouter(apphttp.Dependencies{
 		Auth:     authSvc,
 		Vendor:   vendorSvc,
 		Domain:   domainSvc,
@@ -77,7 +84,11 @@ func New() (*App, error) {
 		DDNS:     ddnsSvc,
 		Logs:     logsSvc,
 		Settings: settingsSvc,
-	})
+	}, cfg.Server.TrustedProxies)
+	if err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("build router: %w", err)
+	}
 
 	schedulerCtx, cancelScheduler := context.WithCancel(context.Background())
 	jobScheduler := scheduler.New(ddnsSvc, time.Second, 4, log.Default())

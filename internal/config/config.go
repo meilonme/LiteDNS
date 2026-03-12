@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"strconv"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -19,8 +20,9 @@ type Config struct {
 }
 
 type ServerConfig struct {
-	Host string `yaml:"host"`
-	Port int    `yaml:"port"`
+	Host           string   `yaml:"host"`
+	Port           int      `yaml:"port"`
+	TrustedProxies []string `yaml:"trusted_proxies"`
 }
 
 type DBConfig struct {
@@ -76,6 +78,8 @@ func defaultConfig() Config {
 		Server: ServerConfig{
 			Host: "0.0.0.0",
 			Port: 8080,
+			// Trust no proxies by default for safer client IP handling.
+			TrustedProxies: nil,
 		},
 		DB: DBConfig{
 			Path: "data.db",
@@ -112,6 +116,9 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v, ok := getenvInt("LITEDNS_SERVER_PORT"); ok {
 		cfg.Server.Port = v
+	}
+	if v, ok := getenvStringSlice("LITEDNS_SERVER_TRUSTED_PROXIES"); ok {
+		cfg.Server.TrustedProxies = v
 	}
 	if v := os.Getenv("LITEDNS_DB_PATH"); v != "" {
 		cfg.DB.Path = v
@@ -158,4 +165,21 @@ func getenvBool(key string) (bool, bool) {
 		return false, false
 	}
 	return v, true
+}
+
+func getenvStringSlice(key string) ([]string, bool) {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return nil, false
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		v := strings.TrimSpace(part)
+		if v == "" {
+			continue
+		}
+		out = append(out, v)
+	}
+	return out, true
 }
