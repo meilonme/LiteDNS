@@ -40,7 +40,7 @@ func New() (*App, error) {
 
 	configPath := strings.TrimSpace(os.Getenv("LITEDNS_CONFIG_PATH"))
 	if configPath == "" {
-		configPath = "config.yaml"
+		configPath = filepath.Join("configs", "config.yaml")
 	}
 
 	cfg, err := config.Load(configPath)
@@ -162,9 +162,22 @@ func runLogCleanup(ctx context.Context, logsSvc *logs.Service, retentionDays int
 
 func ensureContainerConfig() error {
 	const (
-		targetPath  = "/app/config.yaml"
-		examplePath = "/app/config.example.yaml"
+		appDir      = "/app"
+		configDir   = "/app/configs"
+		targetPath  = "/app/configs/config.yaml"
+		examplePath = "/app/configs/config.example.yaml"
 	)
+
+	if _, err := os.Stat(appDir); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		return err
+	}
 
 	if _, err := os.Stat(targetPath); err == nil {
 		return nil

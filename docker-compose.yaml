@@ -10,8 +10,8 @@ services:
       LITEDNS_MASTER_KEY: ${LITEDNS_MASTER_KEY:?LITEDNS_MASTER_KEY is required}
       LITEDNS_DB_PATH: /app/data/data.db
     volumes:
-      - "${LITEDNS_CONFIG_PATH:-../../config.yaml}:/app/config.yaml:ro"
-      - "${LITEDNS_DATA_DIR:-../../data}:/app/data"
+      - "${LITEDNS_CONFIG_DIR:-./configs}:/app/configs"
+      - "${LITEDNS_DATA_DIR:-./data}:/app/data"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
       interval: 30s
