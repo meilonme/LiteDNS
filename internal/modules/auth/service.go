@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 
 	"litedns/internal/security"
@@ -27,6 +29,12 @@ type LoginResult struct {
 	Token              string    `json:"token"`
 	ExpiresAt          time.Time `json:"expires_at"`
 	MustChangePassword bool      `json:"must_change_password"`
+}
+
+type AdminPasswordFileResult struct {
+	Found     bool
+	Changed   bool
+	DeleteErr error
 }
 
 type Service struct {
@@ -79,6 +87,84 @@ func (s *Service) EnsureBootstrapAdmin(ctx context.Context) (string, string, boo
 	}
 
 	return "admin", password, true, nil
+}
+
+func (s *Service) ApplyAdminPasswordFile(ctx context.Context, path string) (AdminPasswordFileResult, error) {
+	return s.applyAdminPasswordFile(ctx, path, os.ReadFile, os.Remove)
+}
+
+func (s *Service) applyAdminPasswordFile(
+	ctx context.Context,
+	path string,
+	readFile func(string) ([]byte, error),
+	removeFile func(string) error,
+) (AdminPasswordFileResult, error) {
+	data, err := readFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return AdminPasswordFileResult{}, nil
+	}
+	if err != nil {
+		return AdminPasswordFileResult{}, fmt.Errorf("read admin password file: %w", err)
+	}
+
+	result := AdminPasswordFileResult{Found: true}
+	password := strings.TrimSpace(string(data))
+	if len(password) < 8 {
+		return result, ErrWeakPassword
+	}
+
+	var (
+		adminID      int64
+		passwordHash string
+	)
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT id, password_hash
+		FROM admins
+		WHERE username = ?
+	`, "admin").Scan(&adminID, &passwordHash); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return result, ErrInvalidCredential
+		}
+		return result, fmt.Errorf("query admin password hash: %w", err)
+	}
+
+	if !security.VerifyPassword(passwordHash, password) {
+		newHash, err := security.HashPassword(password)
+		if err != nil {
+			return result, fmt.Errorf("hash admin password file password: %w", err)
+		}
+
+		now := time.Now().UTC()
+		tx, err := s.db.BeginTx(ctx, nil)
+		if err != nil {
+			return result, fmt.Errorf("begin admin password reset tx: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE admins
+			SET password_hash = ?, must_change_password = 0, updated_at = ?
+			WHERE id = ?
+		`, newHash, now, adminID); err != nil {
+			_ = tx.Rollback()
+			return result, fmt.Errorf("update admin password from file: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE sessions
+			SET revoked_at = ?
+			WHERE admin_id = ? AND revoked_at IS NULL
+		`, now, adminID); err != nil {
+			_ = tx.Rollback()
+			return result, fmt.Errorf("revoke admin sessions after password reset: %w", err)
+		}
+		if err := tx.Commit(); err != nil {
+			return result, fmt.Errorf("commit admin password reset tx: %w", err)
+		}
+		result.Changed = true
+	}
+
+	if err := removeFile(path); err != nil {
+		result.DeleteErr = err
+	}
+	return result, nil
 }
 
 func (s *Service) Login(ctx context.Context, username, password string) (LoginResult, error) {

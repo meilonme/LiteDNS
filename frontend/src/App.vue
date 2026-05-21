@@ -202,6 +202,14 @@ function setNotice(type: NoticeType, text: string): void {
   }, 3200)
 }
 
+function loginErrorText(error: unknown): string {
+  const message = error instanceof Error ? error.message : ''
+  if (message === 'invalid username or password') {
+    return '密码校验未通过，请确认密码后重试'
+  }
+  return message || '登录失败，请稍后重试'
+}
+
 function beginLoading(): void {
   loading.value = true
 }
@@ -496,7 +504,7 @@ async function handleLogin(): Promise<void> {
     loginForm.password = ''
     setNotice('success', '登录成功')
   } catch (error) {
-    setNotice('error', (error as Error).message)
+    setNotice('error', loginErrorText(error))
   } finally {
     endLoading()
   }
@@ -951,6 +959,15 @@ onMounted(async () => {
             @keydown.enter="handleLogin"
           />
         </label>
+
+        <div
+          v-if="notice.show"
+          class="rounded-lg border px-4 py-3 text-sm font-medium"
+          :class="notice.type === 'success' ? 'bg-green-50 border-green-200 text-green-700' : notice.type === 'error' ? 'bg-red-50 border-red-200 text-red-700' : 'bg-blue-50 border-blue-200 text-blue-700'"
+          role="alert"
+        >
+          {{ notice.text }}
+        </div>
 
         <button
           class="w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-all hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"

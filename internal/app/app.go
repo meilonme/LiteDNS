@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -74,9 +75,27 @@ func New() (*App, error) {
 	recordSvc := record.NewService(conn, domainSvc, providerManager)
 	ddnsSvc := ddns.NewService(conn, providerManager, domainSvc, settingsSvc, logsSvc)
 
-	if username, password, created, err := authSvc.EnsureBootstrapAdmin(context.Background()); err != nil {
+	username, password, created, err := authSvc.EnsureBootstrapAdmin(context.Background())
+	if err != nil {
 		_ = conn.Close()
 		return nil, fmt.Errorf("ensure bootstrap admin: %w", err)
+	}
+
+	passwordFileResult, err := authSvc.ApplyAdminPasswordFile(context.Background(), filepath.Join("configs", "admin-password"))
+	if err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("apply admin password file: %w", err)
+	}
+	if passwordFileResult.DeleteErr != nil {
+		log.Printf("warning: admin password file could not be deleted: %v", passwordFileResult.DeleteErr)
+	}
+	if passwordFileResult.Found {
+		if created {
+			log.Printf("bootstrap admin created: username=%s password file applied", username)
+		}
+		if passwordFileResult.Changed {
+			log.Printf("admin password reset from password file")
+		}
 	} else if created {
 		log.Printf("bootstrap admin created: username=%s password=%s", username, password)
 	}
